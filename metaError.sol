@@ -1,71 +1,91 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-contract VendingMachine {
+contract SportsBetting {
     address public owner;
-    uint256 public itemPrice;
-    mapping(address => uint256) public balances;
-    mapping(uint256 => Item) public items;
+    uint256 public eventId;
+    uint256 public betAmount;
+    mapping(address => uint256) public bets;
+    bool public eventResolved;
+    uint256 public winningTeam; // 1 or 2
 
-    struct Item {
-        string name;
-        uint amount;
-    }
+    enum BetStatus { Pending, Won, Lost }
+    mapping(address => BetStatus) public betStatus;
 
-    event ItemPurchased(address indexed buyer, uint256 itemId);
-    event FundsDeposited(address indexed depositor, uint256 amount);
+    event BetPlaced(address indexed bettor, uint256 amount, uint256 team);
+    event BetResolved(address indexed bettor, BetStatus status);
     event FundsWithdrawn(address indexed withdrawer, uint256 amount);
 
     constructor() {
         owner = msg.sender;
-        itemPrice = 1 ether; // Set the price of each item
-        items[1] = Item("Drinks", 25);
-        items[2] = Item("Chips", 25);
-        items[3] = Item("Candy", 25);
-        items[4] = Item("Biscuits", 25);
+        eventId = 1; // Example event ID
+        betAmount = 1 ether; // Minimum bet amount
+        eventResolved = false;
     }
 
-    function depositFunds() external payable {
-        require(msg.value > 0, "Must send Ether to deposit funds");
-        balances[msg.sender] += msg.value;
-        emit FundsDeposited(msg.sender, msg.value);
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can perform this action");
+        _;
     }
 
-    function purchaseItem(uint256 itemId, uint256 amount) external {
-        require(amount > 0, "Amount must be greater than 0");
-        require(balances[msg.sender] >= itemPrice, "Insufficient funds");
-        require(bytes(items[itemId].name).length > 0, "Item does not exist");
-        
-        // Use assert to check that item amount does not go negative
-        assert(items[itemId].amount >= amount); 
-        
-        if (items[itemId].amount < amount) {
-            revert("Item out of stock"); // Use revert to handle out of stock
+    modifier onlyWhenNotResolved() {
+        require(!eventResolved, "Event has already been resolved");
+        _;
+    }
+
+    function placeBet(uint256 team) external payable onlyWhenNotResolved {
+        require(msg.value == betAmount, "Incorrect bet amount");
+        require(team == 1 || team == 2, "Invalid team selection");
+
+        // Using assert to check for invariant
+        assert(bets[msg.sender] == 0); // Each address can only place one bet
+
+        bets[msg.sender] = msg.value;
+        betStatus[msg.sender] = BetStatus.Pending;
+
+        emit BetPlaced(msg.sender, msg.value, team);
+    }
+
+    function resolveEvent(uint256 _winningTeam) external onlyOwner {
+        require(!eventResolved, "Event has already been resolved");
+        require(_winningTeam == 1 || _winningTeam == 2, "Invalid winning team");
+
+        winningTeam = _winningTeam;
+        eventResolved = true;
+
+        // Resolve bets
+        for (address bettor : getAllBettors()) {
+            if (bets[bettor] > 0) {
+                if (betStatus[bettor] == BetStatus.Pending) {
+                    if (team == winningTeam) {
+                        betStatus[bettor] = BetStatus.Won;
+                        payable(bettor).transfer(bets[bettor] * 2); // Return winnings
+                        emit BetResolved(bettor, BetStatus.Won);
+                    } else {
+                        betStatus[bettor] = BetStatus.Lost;
+                        emit BetResolved(bettor, BetStatus.Lost);
+                    }
+                    bets[bettor] = 0; // Reset bet amount
+                }
+            }
         }
-        
-        balances[msg.sender] -= itemPrice;
-        items[itemId].amount -= amount;
-        emit ItemPurchased(msg.sender, itemId);
     }
 
-    function checkBalance() external view returns (uint256) {
-        return balances[msg.sender];
+    function withdrawFunds() external {
+        uint256 amount = address(this).balance;
+        require(amount > 0, "No funds available for withdrawal");
+
+        // Using assert to ensure correct balance
+        assert(amount <= address(this).balance);
+
+        payable(owner).transfer(amount);
+        emit FundsWithdrawn(owner, amount);
     }
 
-    function withdrawFunds(uint256 amount) external {
-        require(amount > 0, "Amount must be greater than 0");
-        require(balances[msg.sender] >= amount, "Insufficient balance");
-        
-        // Use assert to check that the contract balance is sufficient before transfer
-        assert(address(this).balance >= amount);
-        
-        payable(msg.sender).transfer(amount);
-        balances[msg.sender] -= amount;
-        emit FundsWithdrawn(msg.sender, amount);
+    function getAllBettors() private view returns (address[] memory) {
+        // This function is a placeholder. Implement a real way to get all bettors.
+        return new address ;
     }
 
-    function setItemPrice(uint256 newPrice) external {
-        require(msg.sender == owner, "Only owner can set the item price");
-        itemPrice = newPrice;
-    }
+    receive() external payable {}
 }
